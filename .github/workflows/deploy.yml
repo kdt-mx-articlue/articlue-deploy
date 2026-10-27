@@ -58,8 +58,11 @@ jobs:
   build:
     needs: prepare
     runs-on: ubuntu-latest
+    # Docker Hub Secrets 가 없으면 이미지 빌드(검증)만 하고 push 는 건너뜀
+    env:
+      PUSH_ENABLED: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         service: [articlue-ai, articlue-backend, articlue-frontend]
     steps:
@@ -70,15 +73,21 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: Docker Hub 로그인
+        if: env.PUSH_ENABLED == 'true'
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Docker Hub Secrets 없음 안내
+        if: env.PUSH_ENABLED != 'true'
+        run: echo "::notice::DOCKERHUB_USERNAME / DOCKERHUB_TOKEN 미설정 — 빌드만 검증하고 push 는 생략합니다."
+
       - uses: docker/build-push-action@v6
         with:
           context: ./${{ matrix.service }}
-          push: true
+          push: ${{ env.PUSH_ENABLED == 'true' }}
           tags: |
             ${{ needs.prepare.outputs.registry }}/${{ matrix.service }}:portfolio
             ${{ needs.prepare.outputs.registry }}/${{ matrix.service }}:${{ needs.prepare.outputs.sha }}
