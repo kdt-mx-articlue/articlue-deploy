@@ -1,0 +1,12 @@
+[submodule "articlue-ai"]
+	path = articlue-ai
+	url = https://github.com/kdt-mx-articlue/articlue-ai.git
+	branch = main
+[submodule "articlue-backend"]
+	path = articlue-backend
+	url = https://github.com/kdt-mx-articlue/articlue-backend.git
+	branch = main
+[submodule "articlue-frontend"]
+	path = articlue-frontend
+	url = https://github.com/kdt-mx-articlue/articlue-frontend.git
+	branch = main

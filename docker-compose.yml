@@ -1,0 +1,169 @@
+# Articlue 전체 스택
+#   oracle            : Oracle XE 21c (앱 계정 자동 생성)
+#   articlue-migrate  : 백엔드 이미지로 DB 마이그레이션 1회 실행 후 종료 (articlue-backend/db/migrations)
+#   articlue-ai       : FastAPI AI 서버 (내부 5000)
+#   articlue-backend  : Express API 서버 (내부 3000)
+#   articlue-frontend : Nginx (React 정적 파일 + /api 프록시) — 외부 공개 포트는 이것 하나
+#
+# 로컬:  docker compose up -d --build
+# 서버:  docker compose pull && docker compose up -d   (CI가 GHCR에 올린 이미지 사용)
+
+name: articlue
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  oracle:
+    image: gvenzl/oracle-xe:21-slim-faststart
+    container_name: articlue-oracle
+    restart: unless-stopped
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_SYS_PASSWORD:?ORACLE_SYS_PASSWORD 를 .env 에 설정하세요}
+      APP_USER: ${ORACLE_USER:-articlue}
+      APP_USER_PASSWORD: ${ORACLE_PASSWORD:?ORACLE_PASSWORD 를 .env 에 설정하세요}
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    # 디버깅용으로 DB에 직접 붙고 싶으면 주석 해제 (서버에선 127.0.0.1 바인딩 유지 권장)
+    # ports:
+    #   - "127.0.0.1:1521:1521"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    logging: *default-logging
+
+  articlue-ai:
+    image: ${IMAGE_REGISTRY:-ghcr.io/dong3114}/articlue-ai:${IMAGE_TAG:-latest}
+    build:
+      context: ./articlue-ai
+    container_name: articlue-ai
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY 를 .env 에 설정하세요}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.3}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_TTS_VOICE_ID: ${ELEVENLABS_TTS_VOICE_ID:-}
+      ELEVENLABS_TTS_MODEL_ID: ${ELEVENLABS_TTS_MODEL_ID:-eleven_multilingual_v2}
+      ELEVENLABS_TTS_OUTPUT_FORMAT: ${ELEVENLABS_TTS_OUTPUT_FORMAT:-mp3_44100_128}
+      ELEVENLABS_STT_MODEL_ID: ${ELEVENLABS_STT_MODEL_ID:-scribe_v2}
+      TZ: Asia/Seoul
+    volumes:
+      # 벡터 DB 영속화 — 최초 1회 job 파싱(LLM 호출) 결과를 재시작 후에도 유지
+      - ai-vectors:/code/app/data/vectors
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5000/docs"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      # 최초 기동 시 job 파싱으로 수 분 걸릴 수 있음
+      start_period: 900s
+    logging: *default-logging
+
+  # 스키마 변경은 articlue-backend/db/migrations 에 V<번호>__설명.sql 추가 → 배포 시 자동 적용
+  articlue-migrate:
+    image: ${IMAGE_REGISTRY:-ghcr.io/dong3114}/articlue-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ./articlue-backend
+    container_name: articlue-migrate
+    command: ["node", "./scripts/migrate.js", "up"]
+    restart: "no"
+    depends_on:
+      oracle:
+        condition: service_healthy
+    environment:
+      ORACLE_HOST: oracle
+      ORACLE_PORT: 1521
+      ORACLE_SERVICE_NAME: XEPDB1
+      ORACLE_USER: ${ORACLE_USER:-articlue}
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+    logging: *default-logging
+
+  articlue-backend:
+    image: ${IMAGE_REGISTRY:-ghcr.io/dong3114}/articlue-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ./articlue-backend
+    container_name: articlue-backend
+    restart: unless-stopped
+    depends_on:
+      articlue-migrate:
+        condition: service_completed_successfully
+      articlue-ai:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      TZ: Asia/Seoul
+
+      # --- Oracle (Thin 모드) ---
+      ORACLE_HOST: oracle
+      ORACLE_PORT: 1521
+      ORACLE_SERVICE_NAME: XEPDB1
+      ORACLE_USER: ${ORACLE_USER:-articlue}
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+      ORACLE_CLIENT_LIB_DIR: ""
+      ORACLE_POOL_MIN: ${ORACLE_POOL_MIN:-1}
+      ORACLE_POOL_MAX: ${ORACLE_POOL_MAX:-5}
+
+      # --- AI 서버 (컨테이너 내부 통신) ---
+      AI_SERVER_BASE_URL: http://articlue-ai:5000
+      FASTAPI_BASE_URL: http://articlue-ai:5000
+      AI_TIMEOUT: ${AI_TIMEOUT:-0}
+
+      # --- CORS: 브라우저에서 접속하는 주소 ---
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost}
+
+      # --- OpenAI / ElevenLabs (음성 면접) ---
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_TTS_VOICE_ID: ${ELEVENLABS_TTS_VOICE_ID:-}
+      ELEVENLABS_TTS_MODEL_ID: ${ELEVENLABS_TTS_MODEL_ID:-eleven_multilingual_v2}
+      ELEVENLABS_TTS_OUTPUT_FORMAT: ${ELEVENLABS_TTS_OUTPUT_FORMAT:-mp3_44100_128}
+      ELEVENLABS_STT_MODEL_ID: ${ELEVENLABS_STT_MODEL_ID:-scribe_v2}
+
+      # --- 소셜 로그인 (미사용 시 기본값으로 두면 이메일 로그인만 동작) ---
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-not-configured}
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-not-configured}
+      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-not-configured}
+      KAKAO_REDIRECT_URI: ${PUBLIC_ORIGIN:-http://localhost}/auth/kakao/callback
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+      NAVER_REDIRECT_URI: ${PUBLIC_ORIGIN:-http://localhost}/auth/naver/callback
+    volumes:
+      # 크롤링 아티클/트렌드 결과 영속화
+      - backend-storage:/usr/src/app/storage
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(3000,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
+
+  articlue-frontend:
+    image: ${IMAGE_REGISTRY:-ghcr.io/dong3114}/articlue-frontend:${IMAGE_TAG:-latest}
+    build:
+      context: ./articlue-frontend
+      args:
+        VITE_API_BASE_URL: /api/
+        VITE_KAKAO_JS_KEY: ${KAKAO_REST_API_KEY:-}
+        VITE_NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+    container_name: articlue-frontend
+    restart: unless-stopped
+    depends_on:
+      articlue-backend:
+        condition: service_started
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    logging: *default-logging
+
+volumes:
+  oracle-data:
+  ai-vectors:
+  backend-storage:

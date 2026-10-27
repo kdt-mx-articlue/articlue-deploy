@@ -1,0 +1,124 @@
+name: build-and-deploy
+
+# 래퍼 repo main 에 push 되면 3개 이미지를 빌드해 GHCR 에 올리고 서버에 배포합니다.
+#   - 수동 실행(workflow_dispatch) 시 sync_submodules=true 면 각 서비스 repo 의 최신 커밋으로 서브모듈을 올린 뒤 배포
+#   - 서비스 repo 에서 repository_dispatch(event_type: deploy) 를 보내도 동일하게 동작
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+    inputs:
+      sync_submodules:
+        description: "서브모듈을 각 repo 의 추적 브랜치 최신 커밋으로 갱신"
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [deploy]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.ref.outputs.sha }}
+      registry: ${{ steps.ref.outputs.registry }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Sync submodules to latest
+        if: github.event_name == 'repository_dispatch' || inputs.sync_submodules
+        run: |
+          git submodule update --init --remote --recursive
+          if git diff --quiet; then
+            echo "서브모듈 변경 없음"
+            exit 0
+          fi
+          git config user.name "dong3114"
+          git config user.email "scv3114@gmail.com"
+          git commit -am "chore: 서브모듈 최신화"
+          git push
+
+      - id: ref
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        service: [articlue-ai, articlue-backend, articlue-frontend]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          submodules: recursive
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/${{ matrix.service }}:latest
+            ${{ needs.prepare.outputs.registry }}/${{ matrix.service }}:${{ needs.prepare.outputs.sha }}
+          # 프론트 전용 (다른 서비스는 무시됨) — 공개 키라 Repository variables 에 둡니다
+          build-args: |
+            VITE_API_BASE_URL=/api/
+            VITE_KAKAO_JS_KEY=${{ vars.KAKAO_REST_API_KEY }}
+            VITE_NAVER_CLIENT_ID=${{ vars.NAVER_CLIENT_ID }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy:
+    needs: [prepare, build]
+    # 서버 준비 전에는 Repository variables 에 DEPLOY_ENABLED=true 를 넣지 않으면 빌드까지만 수행
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "$PORT" -H "$HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '~/articlue' }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          REGISTRY: ${{ needs.prepare.outputs.registry }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy -p $PORT $USER@$HOST"
+          echo "$GHCR_TOKEN" | $SSH "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+          $SSH "cd $DEPLOY_PATH && DEPLOY_SHA=$SHA IMAGE_REGISTRY=$REGISTRY IMAGE_TAG=$SHA ./scripts/deploy.sh"
