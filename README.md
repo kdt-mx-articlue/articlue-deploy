@@ -20,14 +20,14 @@ Docker Compose 한 번으로 전체 스택을 띄우고, GitHub Actions 로 자�
 ## 1. 로컬 실행
 
 ```bash
-git clone --recurse-submodules <이 repo URL> articlue
+git clone --recurse-submodules https://github.com/kdt-mx-articlue/articlue-deploy.git articlue
 cd articlue
 cp .env.example .env        # OPENAI_API_KEY, ORACLE_* 비밀번호 채우기
 docker compose up -d --build
 docker compose ps           # 전부 healthy / migrate 는 Exited (0) 이면 정상
 ```
 
-- 접속: `http://localhost` (`FRONTEND_PORT` 를 바꿨다면 해당 포트, `PUBLIC_ORIGIN` 도 같이 맞추기)
+- 접속: `http://localhost` (80 포트 고정 — 로컬에서 80을 다른 프로그램이 쓰고 있으면 먼저 종료)
 - 최초 기동 시
   - Oracle 초기화 ~1분 → `articlue-migrate` 가 스키마 + 기업/공고 데이터 적재
   - AI 서버가 채용공고 484건을 LLM 으로 파싱해 벡터 DB 생성 (수 분, OpenAI 소액 과금). 결과는 볼륨에 저장되어 이후엔 생략
@@ -64,16 +64,18 @@ docker compose run --rm articlue-migrate                                    # �
 
 ```bash
 curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker $USER   # 재접속 필요
-git clone --recurse-submodules <이 repo URL> ~/articlue
+git clone --recurse-submodules https://github.com/kdt-mx-articlue/articlue-deploy.git ~/articlue
 cd ~/articlue && cp .env.example .env && vi .env   # PUBLIC_ORIGIN=http://<서버 공인 IP>
 ```
 
-방화벽/보안그룹은 **80(또는 FRONTEND_PORT)과 22만** 열면 됩니다.
+방화벽/보안그룹은 **80과 22만** 열면 됩니다.
 
 ### GitHub repo 설정 (Settings → Secrets and variables → Actions)
 
 | 종류 | 이름 | 값 |
 |------|------|----|
+| Secret | `DOCKERHUB_USERNAME` | `scv3114` |
+| Secret | `DOCKERHUB_TOKEN` | Docker Hub → Account settings → Personal access tokens (Read & Write) |
 | Secret | `DEPLOY_HOST` | 서버 공인 IP |
 | Secret | `DEPLOY_USER` | SSH 사용자 (예: `ubuntu`) |
 | Secret | `DEPLOY_SSH_KEY` | 배포용 SSH 개인키 (공개키는 서버 `~/.ssh/authorized_keys` 에 등록) |
@@ -83,7 +85,8 @@ cd ~/articlue && cp .env.example .env && vi .env   # PUBLIC_ORIGIN=http://<서�
 
 ### 흐름
 
-1. 이 repo `main` 에 push → `prepare` → 3개 이미지 병렬 빌드 → `ghcr.io/<owner>/articlue-*:{latest,SHA}` push
+1. 이 repo `main` 에 push → `prepare` → 3개 이미지 병렬 빌드 → Docker Hub `scv3114/articlue-*:{portfolio,SHA}` push
+   (기존 `:latest` 태그는 덮어쓰지 않음 — 공개 이미지라 서버는 로그인 없이 pull)
 2. `deploy` 가 SSH 로 서버에서 [`scripts/deploy.sh`](scripts/deploy.sh) 실행 → pull → migrate → 무중단에 가깝게 컨테이너 교체
 3. 서비스 repo 의 최신 코드를 반영하려면 Actions → **build-and-deploy → Run workflow → sync_submodules 체크**
    (서브모듈 포인터를 최신으로 올리는 커밋을 만들고 그대로 배포)

@@ -6,7 +6,7 @@
 #   articlue-frontend : Nginx (React 정적 파일 + /api 프록시) — 외부 공개 포트는 이것 하나
 #
 # 로컬:  docker compose up -d --build
-# 서버:  docker compose pull && docker compose up -d   (CI가 GHCR에 올린 이미지 사용)
+# 서버:  docker compose pull && docker compose up -d   (CI가 Docker Hub 에 올린 :portfolio 이미지 사용)
 
 name: articlue
 
@@ -39,7 +39,7 @@ services:
     logging: *default-logging
 
   articlue-ai:
-    image: ${IMAGE_REGISTRY:-ghcr.io/dong3114}/articlue-ai:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-ai:${IMAGE_TAG:-portfolio}
     build:
       context: ./articlue-ai
     container_name: articlue-ai
@@ -68,7 +68,7 @@ services:
 
   # 스키마 변경은 articlue-backend/db/migrations 에 V<번호>__설명.sql 추가 → 배포 시 자동 적용
   articlue-migrate:
-    image: ${IMAGE_REGISTRY:-ghcr.io/dong3114}/articlue-backend:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-backend:${IMAGE_TAG:-portfolio}
     build:
       context: ./articlue-backend
     container_name: articlue-migrate
@@ -86,7 +86,7 @@ services:
     logging: *default-logging
 
   articlue-backend:
-    image: ${IMAGE_REGISTRY:-ghcr.io/dong3114}/articlue-backend:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-backend:${IMAGE_TAG:-portfolio}
     build:
       context: ./articlue-backend
     container_name: articlue-backend
@@ -147,7 +147,7 @@ services:
     logging: *default-logging
 
   articlue-frontend:
-    image: ${IMAGE_REGISTRY:-ghcr.io/dong3114}/articlue-frontend:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-frontend:${IMAGE_TAG:-portfolio}
     build:
       context: ./articlue-frontend
       args:
@@ -160,7 +160,7 @@ services:
       articlue-backend:
         condition: service_started
     ports:
-      - "${FRONTEND_PORT:-80}:80"
+      - "80:80"
     logging: *default-logging
 
 volumes:

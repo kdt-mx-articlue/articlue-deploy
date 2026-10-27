@@ -1,6 +1,7 @@
 name: build-and-deploy
 
-# 래퍼 repo main 에 push 되면 3개 이미지를 빌드해 GHCR 에 올리고 서버에 배포합니다.
+# 래퍼 repo main 에 push 되면 3개 이미지를 빌드해 Docker Hub(scv3114/articlue-*:portfolio) 에 올리고 서버에 배포합니다.
+#   기존 :latest 태그는 덮어쓰지 않습니다.
 #   - 수동 실행(workflow_dispatch) 시 sync_submodules=true 면 각 서비스 repo 의 최신 커밋으로 서브모듈을 올린 뒤 배포
 #   - 서비스 repo 에서 repository_dispatch(event_type: deploy) 를 보내도 동일하게 동작
 on:
@@ -23,7 +24,6 @@ concurrency:
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   prepare:
@@ -53,7 +53,7 @@ jobs:
       - id: ref
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          echo "registry=${{ vars.IMAGE_REGISTRY || 'docker.io/scv3114' }}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: prepare
@@ -72,16 +72,15 @@ jobs:
 
       - uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - uses: docker/build-push-action@v6
         with:
           context: ./${{ matrix.service }}
           push: true
           tags: |
-            ${{ needs.prepare.outputs.registry }}/${{ matrix.service }}:latest
+            ${{ needs.prepare.outputs.registry }}/${{ matrix.service }}:portfolio
             ${{ needs.prepare.outputs.registry }}/${{ matrix.service }}:${{ needs.prepare.outputs.sha }}
           # 프론트 전용 (다른 서비스는 무시됨) — 공개 키라 Repository variables 에 둡니다
           build-args: |
@@ -117,8 +116,6 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '~/articlue' }}
           SHA: ${{ needs.prepare.outputs.sha }}
           REGISTRY: ${{ needs.prepare.outputs.registry }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SSH="ssh -i ~/.ssh/id_deploy -p $PORT $USER@$HOST"
-          echo "$GHCR_TOKEN" | $SSH "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
           $SSH "cd $DEPLOY_PATH && DEPLOY_SHA=$SHA IMAGE_REGISTRY=$REGISTRY IMAGE_TAG=$SHA ./scripts/deploy.sh"
