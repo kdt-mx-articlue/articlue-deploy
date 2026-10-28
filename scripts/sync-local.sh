@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 로컬 동기화 — 웹(GitHub)에서 PR 병합이 끝난 뒤 변경사항을 받아오기만 한다.
-#   커밋·push 는 하지 않는다. 서브모듈 포인터도 커밋하지 않는다
-#   (배포는 각 서비스 repo CI 가 만든 이미지 기준이라 포인터는 배포와 무관).
+#   커밋·push 는 하지 않는다. 동기화 후 서브모듈이 'M' 이면 포인터가 서비스 main 보다
+#   뒤처진 것 — 래퍼 main 에 포인터 갱신 커밋을 따로 올린다 (README 1장).
 #
 #   ./scripts/sync-local.sh
 #     1. 래퍼 repo: main 을 fast-forward 로 pull
@@ -77,4 +77,4 @@ if [ "$problems" -gt 0 ]; then
   exit 1
 fi
 echo "동기화 완료. 커밋·push 는 하지 않았습니다."
-echo "래퍼 git status 에 서브모듈이 'M' 으로 보여도 정상 — 포인터는 배포와 무관하니 커밋하지 않습니다."
+echo "래퍼 git status 에 서브모듈이 'M' 이면 포인터가 서비스 main 보다 뒤처진 것 — 포인터 갱신 커밋이 필요합니다."

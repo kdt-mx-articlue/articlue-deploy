@@ -4,7 +4,7 @@ name: deploy
 #   - 서비스 repo main 병합 → 이미지 push → repository_dispatch(deploy) → 이 워크플로
 #   - 이 repo main 에 compose·스크립트 변경이 병합되면 바로 배포
 #   - 수동 실행: Actions → deploy → Run workflow (이미지 태그 지정 시 롤백)
-# 서브모듈 포인터는 배포와 무관 (서버는 서비스 소스 없이 이미지만 사용)
+# 서버는 서비스 소스 없이 이미지만 사용. 서브모듈 포인터는 그 이미지 :SHA 와 같은 커밋으로 맞춰 둔다
 on:
   push:
     branches: [main]
