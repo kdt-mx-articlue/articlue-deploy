@@ -170,6 +170,7 @@ services:
       context: ./articlue-frontend
       args:
         VITE_API_BASE_URL: /api/
+        VITE_MEDIA_BASE_URL: ${VITE_MEDIA_BASE_URL-https://media.donghwan.cloud}
         VITE_KAKAO_JS_KEY: ${KAKAO_REST_API_KEY:-}
         VITE_NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
     container_name: articlue-frontend
@@ -178,7 +179,7 @@ services:
       articlue-backend:
         condition: service_started
     ports:
-      - "80:80"
+      - "127.0.0.1:80:80"
     logging: *default-logging
 
 volumes:
