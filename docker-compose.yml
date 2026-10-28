@@ -178,8 +178,26 @@ services:
     depends_on:
       articlue-backend:
         condition: service_started
+    # 외부 공개 범위·포트는 .env 로 조정 (HTTP_BIND, HTTP_PORT)
+    #   기본 127.0.0.1:80 — 이 PC 안에서만 열림 (터널·리버스 프록시가 받아 줌)
+    #   클라우드 VM 에서 직접 공개: HTTP_BIND=0.0.0.0
     ports:
-      - "127.0.0.1:80:80"
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-80}:80"
+    logging: *default-logging
+
+  # Cloudflare Tunnel (선택) — 포트포워딩·공인 IP 없이 외부 공개, HTTPS 는 Cloudflare 가 처리
+  #   .env 에 COMPOSE_PROFILES=tunnel, CLOUDFLARE_TUNNEL_TOKEN 설정
+  #   Cloudflare 대시보드에서 터널 Public Hostname 의 서비스 주소: http://articlue-frontend:80
+  cloudflared:
+    image: cloudflare/cloudflared:2025.11.1
+    profiles: ["tunnel"]
+    container_name: articlue-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - articlue-frontend
     logging: *default-logging
 
 volumes:

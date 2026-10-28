@@ -27,7 +27,7 @@ docker compose up -d --build
 docker compose ps           # 전부 healthy / migrate 는 Exited (0) 이면 정상
 ```
 
-- 접속: `http://localhost` (80 포트 고정 — 로컬에서 80을 다른 프로그램이 쓰고 있으면 먼저 종료)
+- 접속: `http://localhost` (기본 `127.0.0.1:80`. 80 을 다른 프로그램이 쓰면 `.env` 에 `HTTP_PORT=8080` + `PUBLIC_ORIGIN=http://localhost:8080`)
 - 최초 기동 시
   - Oracle 초기화 ~1분 → `articlue-migrate` 가 스키마 + 기업/공고 데이터 적재
   - AI 서버가 채용공고 484건을 LLM 으로 파싱해 벡터 DB 생성 (수 분, OpenAI 소액 과금). 결과는 볼륨에 저장되어 이후엔 생략
@@ -61,6 +61,8 @@ docker compose up -d --build   # main 최신 코드로 다시 띄우기
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_TTS_VOICE_ID` | | 보이스 면접 |
 | `KAKAO_*`, `NAVER_*`, `GITHUB_CLIENT_ID` | | 소셜 로그인 (미설정 시 비활성) |
 | `IMAGE_REGISTRY`, `IMAGE_TAG` | | 서버에서 pull 할 이미지 위치 |
+| `HTTP_BIND`, `HTTP_PORT` | | 외부 공개 범위·포트. 기본 `127.0.0.1` / `80` (아래 4장 "외부 공개 방식") |
+| `COMPOSE_PROFILES`, `CLOUDFLARE_TUNNEL_TOKEN` | | `tunnel` 이면 Cloudflare Tunnel 함께 실행 |
 
 > 서비스 repo 내부의 `.env` 는 필요 없습니다. compose 가 컨테이너 환경변수로 직접 주입합니다.
 
@@ -84,7 +86,19 @@ git clone --recurse-submodules https://github.com/kdt-mx-articlue/articlue-deplo
 cd ~/articlue && cp .env.example .env && vi .env   # PUBLIC_ORIGIN=http://<서버 공인 IP>
 ```
 
-방화벽/보안그룹은 **80과 22만** 열면 됩니다.
+### 외부 공개 방식 — `.env` 만 바꾸면 됩니다 (compose 수정 불필요)
+
+| 방식 | `.env` | 방화벽/보안그룹 | HTTPS |
+|------|--------|----------------|-------|
+| **Cloudflare Tunnel** (노트북·VM 공통, 기본 추천) | `COMPOSE_PROFILES=tunnel`, `CLOUDFLARE_TUNNEL_TOKEN=…` (HTTP_BIND 는 기본 `127.0.0.1`) | 22 만 (집 노트북은 아무것도 안 열어도 됨) | Cloudflare 가 처리 |
+| 클라우드 VM 직접 공개 | `HTTP_BIND=0.0.0.0` | 80 (+ 22) | 앞단에 Caddy/Nginx + Let's Encrypt, 또는 클라우드 로드밸런서 |
+| 클라우드 로드밸런서 뒤 | `HTTP_BIND=0.0.0.0`, 보안그룹으로 LB 에서 오는 요청만 허용 | 80 (LB 만) | LB 인증서 |
+
+- 터널: Cloudflare Zero Trust → Networks → Tunnels → 터널 생성 → 토큰을 `.env` 에. Public Hostname 의 서비스 주소는 `http://articlue-frontend:80` (같은 Docker 네트워크라 호스트 포트와 무관).
+- 어느 방식이든 `PUBLIC_ORIGIN` 은 브라우저 주소 그대로 (`https://articlue.example.com`) — OAuth Redirect 가 이 값으로 계산됩니다.
+- `COMPOSE_PROFILES` 를 `.env` 에 두면 `docker compose up`·`scripts/deploy.sh` 가 자동으로 터널까지 띄웁니다.
+- 관리형 서비스(ECS·Cloud Run·Kubernetes)로 옮길 때는 compose 대신 같은 Docker Hub 이미지와 환경변수를 씁니다. Oracle·벡터 볼륨은 관리형 DB·영구 디스크로 옮겨야 합니다.
+- OCI 무료 ARM 서버는 이미지가 `linux/amd64` 뿐이라 그대로 못 뜹니다 (CI 를 `linux/amd64,linux/arm64` 로 빌드 + Oracle 이미지를 `gvenzl/oracle-free:23` 으로).
 
 ### 구조 — 각 서비스 repo 가 자기 이미지를 빌드
 
@@ -141,4 +155,4 @@ docker compose down -v                           # ⚠️ DB·벡터 데이터�
 
 - 데이터 볼륨: `oracle-data`(DB), `ai-vectors`(벡터 DB), `backend-storage`(크롤링 아티클)
 - 백엔드의 DBR 크롤링은 Playwright/Chrome 이 없어 에러 로그가 날 수 있으나 서비스에는 영향 없습니다.
-- HTTPS 가 필요하면 도메인 연결 후 앞단에 Caddy/Nginx + Let's Encrypt 를 두고 `PUBLIC_ORIGIN` 을 `https://...` 로 바꾸세요.
+- HTTPS 는 Cloudflare Tunnel 이 가장 간단합니다 (4장 "외부 공개 방식"). 직접 공개라면 앞단에 Caddy/Nginx + Let's Encrypt 를 두고 `PUBLIC_ORIGIN` 을 `https://...` 로 바꾸세요.
