@@ -50,8 +50,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY 를 .env 에 설정하세요}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.3}
-      # 이력서 1건당 유사도 상위 N개 공고만 점수 계산·저장 (공고가 늘어도 분석 시간 일정)
-      MATCH_TOP_K: ${MATCH_TOP_K:-50}
+      # 1차 매칭 점수를 계산할 공고 수 (0 = 전체, 검색·상세 분석이 1차 점수를 전제로 함)
+      MATCH_TOP_K: ${MATCH_TOP_K:-0}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       ELEVENLABS_TTS_VOICE_ID: ${ELEVENLABS_TTS_VOICE_ID:-}
       ELEVENLABS_TTS_MODEL_ID: ${ELEVENLABS_TTS_MODEL_ID:-eleven_multilingual_v2}
