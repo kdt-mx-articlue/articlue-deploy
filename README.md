@@ -33,6 +33,20 @@ docker compose ps           # 전부 healthy / migrate 는 Exited (0) 이면 정
   - AI 서버가 채용공고 484건을 LLM 으로 파싱해 벡터 DB 생성 (수 분, OpenAI 소액 과금). 결과는 볼륨에 저장되어 이후엔 생략
 - 이메일 회원가입/로그인은 소셜 키 없이 바로 동작합니다.
 
+### 작업 흐름 — 병합은 웹, 로컬은 받아오기만
+
+1. 서비스 repo 에서 `기능 브랜치 → dev → main` PR 을 **GitHub 웹에서** 병합
+2. 서브모듈 포인터 갱신(배포 반영)도 웹에서: Actions → **build-and-deploy → Run workflow → sync_submodules 체크**
+3. 로컬은 받아오기만 합니다 (커밋·push 없음)
+
+```bash
+./scripts/sync-local.sh        # 래퍼 main pull + 서비스 repo 3개 main 으로 전환·pull
+docker compose up -d --build   # main 최신 코드로 다시 띄우기
+```
+
+- 작업 중인 변경이 있는 repo 는 건드리지 않고 알려 줍니다.
+- 동기화 후 래퍼 `git status` 에 서브모듈이 `M` 으로 보이면 "포인터보다 main 이 앞선 상태"입니다. 로컬에서 커밋하지 말고 2번(Actions)으로 갱신하세요.
+
 ## 2. 환경변수
 
 모든 값은 루트 `.env` 하나로 관리하고, `docker-compose.yml` 이 서비스별로 나눠 전달합니다. 자세한 설명은 [.env.example](.env.example) 참고.
@@ -89,7 +103,7 @@ cd ~/articlue && cp .env.example .env && vi .env   # PUBLIC_ORIGIN=http://<서�
    (기존 `:latest` 태그는 덮어쓰지 않음 — 공개 이미지라 서버는 로그인 없이 pull)
 2. `deploy` 가 SSH 로 서버에서 [`scripts/deploy.sh`](scripts/deploy.sh) 실행 → pull → migrate → 무중단에 가깝게 컨테이너 교체
 3. 서비스 repo 의 최신 코드를 반영하려면 Actions → **build-and-deploy → Run workflow → sync_submodules 체크**
-   (서브모듈 포인터를 최신으로 올리는 커밋을 만들고 그대로 배포)
+   (서브모듈 포인터를 각 repo `main` 최신으로 올리는 커밋을 CI 가 만들고 그대로 배포 — 포인터는 로컬에서 커밋하지 않음)
 
 롤백: 서버에서 `IMAGE_TAG=<이전 커밋 SHA> ./scripts/deploy.sh`
 
