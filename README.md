@@ -36,7 +36,7 @@ docker compose ps           # 전부 healthy / migrate 는 Exited (0) 이면 정
 ### 작업 흐름 — 병합은 웹, 로컬은 받아오기만
 
 1. 서비스 repo 에서 `기능 브랜치 → dev → main` PR 을 **GitHub 웹에서** 병합
-2. 서브모듈 포인터 갱신(배포 반영)도 웹에서: Actions → **build-and-deploy → Run workflow → sync_submodules 체크**
+2. main 병합이 끝나면 그 서비스 repo 의 CI 가 이미지를 빌드·push 하고 서버 배포까지 요청합니다 (아래 4장)
 3. 로컬은 받아오기만 합니다 (커밋·push 없음)
 
 ```bash
@@ -45,7 +45,7 @@ docker compose up -d --build   # main 최신 코드로 다시 띄우기
 ```
 
 - 작업 중인 변경이 있는 repo 는 건드리지 않고 알려 줍니다.
-- 동기화 후 래퍼 `git status` 에 서브모듈이 `M` 으로 보이면 "포인터보다 main 이 앞선 상태"입니다. 로컬에서 커밋하지 말고 2번(Actions)으로 갱신하세요.
+- 동기화 후 래퍼 `git status` 에 서브모듈이 `M` 으로 보여도 정상입니다. 배포는 이미지 기준이라 **서브모듈 포인터는 배포와 무관**하니 커밋하지 않습니다 (로컬 개발 편의용).
 
 ## 2. 환경변수
 
@@ -84,28 +84,49 @@ cd ~/articlue && cp .env.example .env && vi .env   # PUBLIC_ORIGIN=http://<서�
 
 방화벽/보안그룹은 **80과 22만** 열면 됩니다.
 
-### GitHub repo 설정 (Settings → Secrets and variables → Actions)
+### 구조 — 각 서비스 repo 가 자기 이미지를 빌드
+
+```
+서비스 repo (ai / backend / frontend)          articlue-deploy (이 repo)          서버
+  main 병합 → docker-image 워크플로             deploy 워크플로                    scripts/deploy.sh
+             이미지 빌드 → Docker Hub push ──▶  (repository_dispatch) ── SSH ──▶  docker compose pull → up
+             scv3114/<서비스>:portfolio, :SHA
+```
+
+- 서버는 서비스 소스 없이 이미지만 씁니다. **서브모듈 포인터는 배포와 무관**합니다 (로컬 개발용).
+- 기존 `:latest` 태그는 팀 서버가 쓸 수 있어 덮어쓰지 않습니다. 공개 이미지라 서버는 로그인 없이 pull 합니다.
+
+### GitHub 설정 (Settings → Secrets and variables → Actions)
+
+**서비스 repo 3개** (organization 단위 Secrets/Variables 로 한 번에 넣어도 됩니다)
 
 | 종류 | 이름 | 값 |
 |------|------|----|
 | Secret | `DOCKERHUB_USERNAME` | `scv3114` |
 | Secret | `DOCKERHUB_TOKEN` | Docker Hub → Account settings → Personal access tokens (Read & Write) |
+| Secret | `DEPLOY_DISPATCH_TOKEN` | (선택) GitHub Fine-grained PAT — 대상 `articlue-deploy`, 권한 Contents: Read and write. 없으면 이미지만 올리고 배포는 수동 |
+| Variable | `KAKAO_REST_API_KEY`, `NAVER_CLIENT_ID` | (frontend, 선택) 번들에 들어가는 공개 키 |
+
+**이 repo (articlue-deploy)**
+
+| 종류 | 이름 | 값 |
+|------|------|----|
 | Secret | `DEPLOY_HOST` | 서버 공인 IP |
 | Secret | `DEPLOY_USER` | SSH 사용자 (예: `ubuntu`) |
 | Secret | `DEPLOY_SSH_KEY` | 배포용 SSH 개인키 (공개키는 서버 `~/.ssh/authorized_keys` 에 등록) |
 | Secret | `DEPLOY_PORT` / `DEPLOY_PATH` | (선택) 기본 `22` / `~/articlue` |
-| Variable | `DEPLOY_ENABLED` | `true` — 넣기 전까지는 빌드·푸시까지만 수행 |
-| Variable | `KAKAO_REST_API_KEY`, `NAVER_CLIENT_ID` | (선택) 프론트 빌드에 들어가는 공개 키 |
+| Variable | `DEPLOY_ENABLED` | `true` — 넣기 전까지는 배포 워크플로가 실행되지 않음 |
 
 ### 흐름
 
-1. 이 repo `main` 에 push → `prepare` → 3개 이미지 병렬 빌드 → Docker Hub `scv3114/articlue-*:{portfolio,SHA}` push
-   (기존 `:latest` 태그는 덮어쓰지 않음 — 공개 이미지라 서버는 로그인 없이 pull)
-2. `deploy` 가 SSH 로 서버에서 [`scripts/deploy.sh`](scripts/deploy.sh) 실행 → pull → migrate → 무중단에 가깝게 컨테이너 교체
-3. 서비스 repo 의 최신 코드를 반영하려면 Actions → **build-and-deploy → Run workflow → sync_submodules 체크**
-   (서브모듈 포인터를 각 repo `main` 최신으로 올리는 커밋을 CI 가 만들고 그대로 배포 — 포인터는 로컬에서 커밋하지 않음)
+1. 서비스 repo `main` 에 PR 병합 → 그 repo 의 `docker-image` 워크플로가 이미지 빌드·push → `articlue-deploy` 에 배포 요청
+2. `deploy` 워크플로가 SSH 로 서버에서 [`scripts/deploy.sh`](scripts/deploy.sh) 실행 → 이미지 pull → migrate → 컨테이너 교체
+3. 이 repo 의 compose·스크립트 변경이 `main` 에 병합돼도 바로 배포
+4. 수동 배포: Actions → **deploy → Run workflow**
 
-롤백: 서버에서 `IMAGE_TAG=<이전 커밋 SHA> ./scripts/deploy.sh`
+롤백 (커밋 SHA 태그)
+- 전체: Actions → deploy → Run workflow → `image_tag` 에 SHA, 또는 서버에서 `IMAGE_TAG=<SHA> ./scripts/deploy.sh`
+- 서비스 하나만: 서버에서 `BACKEND_IMAGE_TAG=<SHA> ./scripts/deploy.sh` (`AI_` / `BACKEND_` / `FRONTEND_IMAGE_TAG`)
 
 ## 5. 운영 메모
 

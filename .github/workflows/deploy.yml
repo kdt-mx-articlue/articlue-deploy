@@ -1,111 +1,43 @@
-name: build-and-deploy
+name: deploy
 
-# 래퍼 repo main 에 push 되면 3개 이미지를 빌드해 Docker Hub(scv3114/articlue-*:portfolio) 에 올리고 서버에 배포합니다.
-#   기존 :latest 태그는 덮어쓰지 않습니다.
-#   - 수동 실행(workflow_dispatch) 시 sync_submodules=true 면 각 서비스 repo 의 최신 커밋으로 서브모듈을 올린 뒤 배포
-#   - 서비스 repo 에서 repository_dispatch(event_type: deploy) 를 보내도 동일하게 동작
+# 서버에 최신 이미지를 받아 다시 띄운다. 이미지는 각 서비스 repo 의 docker-image 워크플로가 빌드·push 한다.
+#   - 서비스 repo main 병합 → 이미지 push → repository_dispatch(deploy) → 이 워크플로
+#   - 이 repo main 에 compose·스크립트 변경이 병합되면 바로 배포
+#   - 수동 실행: Actions → deploy → Run workflow (이미지 태그 지정 시 롤백)
+# 서브모듈 포인터는 배포와 무관 (서버는 서비스 소스 없이 이미지만 사용)
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "**.md"
-  workflow_dispatch:
-    inputs:
-      sync_submodules:
-        description: "서브모듈을 각 repo 의 추적 브랜치 최신 커밋으로 갱신"
-        type: boolean
-        default: false
+    paths:
+      - docker-compose.yml
+      - scripts/**
+      - .github/workflows/deploy.yml
   repository_dispatch:
     types: [deploy]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "배포할 이미지 태그 (비우면 portfolio = 각 서비스 main 최신, 롤백은 커밋 SHA)"
+        type: string
+        default: ""
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy
   cancel-in-progress: false
 
-permissions:
-  contents: write
-
 jobs:
-  prepare:
-    runs-on: ubuntu-latest
-    outputs:
-      sha: ${{ steps.ref.outputs.sha }}
-      registry: ${{ steps.ref.outputs.registry }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 0
-
-      - name: Sync submodules to latest
-        if: github.event_name == 'repository_dispatch' || inputs.sync_submodules
-        run: |
-          git submodule update --init --remote --recursive
-          if git diff --quiet; then
-            echo "서브모듈 변경 없음"
-            exit 0
-          fi
-          git config user.name "dong3114"
-          git config user.email "scv3114@gmail.com"
-          git commit -am "chore: 서브모듈 최신화"
-          git push
-
-      - id: ref
-        run: |
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "registry=${{ vars.IMAGE_REGISTRY || 'docker.io/scv3114' }}" >> "$GITHUB_OUTPUT"
-
-  build:
-    needs: prepare
-    runs-on: ubuntu-latest
-    # Docker Hub Secrets 가 없으면 이미지 빌드(검증)만 하고 push 는 건너뜀
-    env:
-      PUSH_ENABLED: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        service: [articlue-ai, articlue-backend, articlue-frontend]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-          submodules: recursive
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Docker Hub 로그인
-        if: env.PUSH_ENABLED == 'true'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Docker Hub Secrets 없음 안내
-        if: env.PUSH_ENABLED != 'true'
-        run: echo "::notice::DOCKERHUB_USERNAME / DOCKERHUB_TOKEN 미설정 — 빌드만 검증하고 push 는 생략합니다."
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: ./${{ matrix.service }}
-          push: ${{ env.PUSH_ENABLED == 'true' }}
-          tags: |
-            ${{ needs.prepare.outputs.registry }}/${{ matrix.service }}:portfolio
-            ${{ needs.prepare.outputs.registry }}/${{ matrix.service }}:${{ needs.prepare.outputs.sha }}
-          # 프론트 전용 (다른 서비스는 무시됨) — 공개 키라 Repository variables 에 둡니다
-          build-args: |
-            VITE_API_BASE_URL=/api/
-            VITE_KAKAO_JS_KEY=${{ vars.KAKAO_REST_API_KEY }}
-            VITE_NAVER_CLIENT_ID=${{ vars.NAVER_CLIENT_ID }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-
   deploy:
-    needs: [prepare, build]
-    # 서버 준비 전에는 Repository variables 에 DEPLOY_ENABLED=true 를 넣지 않으면 빌드까지만 수행
+    # 서버 준비 전에는 Repository variables 에 DEPLOY_ENABLED=true 를 넣지 않으면 실행하지 않음
     if: vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: 요청 정보
+        run: |
+          echo "event: ${{ github.event_name }}"
+          echo "service: ${{ github.event.client_payload.service || '-' }} @ ${{ github.event.client_payload.sha || '-' }}"
+          echo "image_tag: ${{ inputs.image_tag || 'portfolio' }}"
+
       - name: Setup SSH
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -123,8 +55,8 @@ jobs:
           USER: ${{ secrets.DEPLOY_USER }}
           PORT: ${{ secrets.DEPLOY_PORT || '22' }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '~/articlue' }}
-          SHA: ${{ needs.prepare.outputs.sha }}
-          REGISTRY: ${{ needs.prepare.outputs.registry }}
+          REGISTRY: ${{ vars.IMAGE_REGISTRY || 'docker.io/scv3114' }}
+          IMAGE_TAG: ${{ inputs.image_tag || 'portfolio' }}
         run: |
           SSH="ssh -i ~/.ssh/id_deploy -p $PORT $USER@$HOST"
-          $SSH "cd $DEPLOY_PATH && DEPLOY_SHA=$SHA IMAGE_REGISTRY=$REGISTRY IMAGE_TAG=$SHA ./scripts/deploy.sh"
+          $SSH "cd $DEPLOY_PATH && IMAGE_REGISTRY=$REGISTRY IMAGE_TAG=$IMAGE_TAG ./scripts/deploy.sh"
