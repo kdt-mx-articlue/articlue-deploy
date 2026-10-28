@@ -6,7 +6,7 @@
 #   articlue-frontend : Nginx (React 정적 파일 + /api 프록시) — 외부 공개 포트는 이것 하나
 #
 # 로컬:  docker compose up -d --build
-# 서버:  docker compose pull && docker compose up -d   (CI가 Docker Hub 에 올린 :portfolio 이미지 사용)
+# 서버:  docker compose pull && docker compose up -d   (각 서비스 repo CI 가 Docker Hub 에 올린 :portfolio 이미지 사용)
 
 name: articlue
 
@@ -41,7 +41,7 @@ services:
     logging: *default-logging
 
   articlue-ai:
-    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-ai:${IMAGE_TAG:-portfolio}
+    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-ai:${AI_IMAGE_TAG:-${IMAGE_TAG:-portfolio}}
     build:
       context: ./articlue-ai
     container_name: articlue-ai
@@ -50,8 +50,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY 를 .env 에 설정하세요}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.3}
-      # 이력서 1건당 유사도 상위 N개 공고만 점수 계산·저장 (공고가 늘어도 분석 시간 일정)
-      MATCH_TOP_K: ${MATCH_TOP_K:-50}
+      # 면접 최종 리포트(면접 1회당 1번) 전용 모델 — 질문별 판정·사실 오류 지적 품질
+      INTERVIEW_REPORT_MODEL: ${INTERVIEW_REPORT_MODEL:-gpt-4.1-mini}
+      # 1차 매칭 점수를 계산할 공고 수 (0 = 전체, 검색·상세 분석이 1차 점수를 전제로 함)
+      MATCH_TOP_K: ${MATCH_TOP_K:-0}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       ELEVENLABS_TTS_VOICE_ID: ${ELEVENLABS_TTS_VOICE_ID:-}
       ELEVENLABS_TTS_MODEL_ID: ${ELEVENLABS_TTS_MODEL_ID:-eleven_multilingual_v2}
@@ -72,7 +74,7 @@ services:
 
   # 스키마 변경은 articlue-backend/db/migrations 에 V<번호>__설명.sql 추가 → 배포 시 자동 적용
   articlue-migrate:
-    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-backend:${IMAGE_TAG:-portfolio}
+    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-backend:${BACKEND_IMAGE_TAG:-${IMAGE_TAG:-portfolio}}
     build:
       context: ./articlue-backend
     container_name: articlue-migrate
@@ -90,7 +92,7 @@ services:
     logging: *default-logging
 
   articlue-backend:
-    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-backend:${IMAGE_TAG:-portfolio}
+    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-backend:${BACKEND_IMAGE_TAG:-${IMAGE_TAG:-portfolio}}
     build:
       context: ./articlue-backend
     container_name: articlue-backend
@@ -147,6 +149,10 @@ services:
       JOB_CRAWL_SOURCES: ${JOB_CRAWL_SOURCES:-WANTED,SARAMIN,JOBKOREA}
       JOB_CRAWL_KEYWORDS: ${JOB_CRAWL_KEYWORDS:-백엔드,프론트엔드,풀스택,데이터 엔지니어,AI 엔지니어}
       JOB_CRAWL_MAX_NEW_PER_SOURCE: ${JOB_CRAWL_MAX_NEW_PER_SOURCE:-20}
+
+      # --- 모의 면접 이용 한도 (면접 시작 API 에서 검사, 체험 계정은 음성 면접 불가) ---
+      INTERVIEW_FREE_LIMIT: ${INTERVIEW_FREE_LIMIT:-3}
+      DEMO_INTERVIEW_LIMIT: ${DEMO_INTERVIEW_LIMIT:-2}
     volumes:
       # 크롤링 아티클/트렌드 결과 영속화
       - backend-storage:/usr/src/app/storage
@@ -159,7 +165,7 @@ services:
     logging: *default-logging
 
   articlue-frontend:
-    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-frontend:${IMAGE_TAG:-portfolio}
+    image: ${IMAGE_REGISTRY:-docker.io/scv3114}/articlue-frontend:${FRONTEND_IMAGE_TAG:-${IMAGE_TAG:-portfolio}}
     build:
       context: ./articlue-frontend
       args:
