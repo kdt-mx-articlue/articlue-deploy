@@ -147,6 +147,10 @@ services:
       JOB_CRAWL_SOURCES: ${JOB_CRAWL_SOURCES:-WANTED,SARAMIN,JOBKOREA}
       JOB_CRAWL_KEYWORDS: ${JOB_CRAWL_KEYWORDS:-백엔드,프론트엔드,풀스택,데이터 엔지니어,AI 엔지니어}
       JOB_CRAWL_MAX_NEW_PER_SOURCE: ${JOB_CRAWL_MAX_NEW_PER_SOURCE:-20}
+
+      # --- 모의 면접 이용 한도 (면접 시작 API 에서 검사, 체험 계정은 음성 면접 불가) ---
+      INTERVIEW_FREE_LIMIT: ${INTERVIEW_FREE_LIMIT:-3}
+      DEMO_INTERVIEW_LIMIT: ${DEMO_INTERVIEW_LIMIT:-2}
     volumes:
       # 크롤링 아티클/트렌드 결과 영속화
       - backend-storage:/usr/src/app/storage
