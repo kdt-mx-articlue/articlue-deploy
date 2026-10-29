@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 로컬 동기화 — 웹(GitHub)에서 PR 병합이 끝난 뒤 변경사항을 받아오기만 한다.
 #   커밋·push 는 하지 않는다. 동기화 후 서브모듈이 'M' 이면 포인터가 서비스 main 보다
-#   뒤처진 것 — 래퍼 main 에 포인터 갱신 커밋을 따로 올린다 (README 1장).
+#   뒤처진 것 — 래퍼 main 에 포인터 갱신 커밋을 따로 올린다 (docs/DEPLOY.md 5장).
 #
 #   ./scripts/sync-local.sh
 #     1. 래퍼 repo: main 을 fast-forward 로 pull
