@@ -56,6 +56,8 @@ docker compose up -d --build
 | `ADMIN_TOKEN` | | 관리자 배치 화면 접속 토큰 (비우면 관리자 기능 비활성) |
 | `BATCH_ENABLED`, `JOB_CRAWL_*` | | 배치 on/off, 채용공고 수집 주기·사이트·키워드·사이트당 최대 건수 |
 | `INTERVIEW_FREE_LIMIT`, `DEMO_INTERVIEW_LIMIT` | | 모의 면접 이용 한도 (일반 / 체험 계정) |
+| `JWT_SECRET` | 권장 | 로그인 세션(httpOnly 쿠키) 서명 키. 비우면 재시작마다 모두 다시 로그인 (`openssl rand -hex 32`) |
+| `DEMO_SIGNUP_IP_LIMIT`, `SIGNUP_IP_LIMIT`, `DEMO_SIGNUP_DAILY_LIMIT` | | 최근 24시간 회원가입 제한: IP당 체험 계정(5) / IP당 전체(10) / 체험 계정 전체(50) |
 | `HTTP_BIND`, `HTTP_PORT` | | 외부 공개 범위·포트. 기본 `127.0.0.1` / `80` (6장) |
 | `COMPOSE_PROFILES`, `CLOUDFLARE_TUNNEL_TOKEN` | | `tunnel` 이면 Cloudflare Tunnel 함께 실행 |
 | `VITE_MEDIA_BASE_URL` | | (소스 빌드 시) 로딩 영상 등 미디어 주소. 기본 `https://media.donghwan.cloud` |

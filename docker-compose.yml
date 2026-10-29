@@ -153,6 +153,14 @@ services:
       # --- 모의 면접 이용 한도 (면접 시작 API 에서 검사, 체험 계정은 음성 면접 불가) ---
       INTERVIEW_FREE_LIMIT: ${INTERVIEW_FREE_LIMIT:-3}
       DEMO_INTERVIEW_LIMIT: ${DEMO_INTERVIEW_LIMIT:-2}
+
+      # --- 로그인 세션 (httpOnly 쿠키 JWT). 비우면 재시작할 때마다 모두 다시 로그인 ---
+      JWT_SECRET: ${JWT_SECRET:-}
+
+      # --- 같은 IP 회원가입 제한 (최근 24시간, IP 는 해시로만 저장) ---
+      DEMO_SIGNUP_IP_LIMIT: ${DEMO_SIGNUP_IP_LIMIT:-5}
+      SIGNUP_IP_LIMIT: ${SIGNUP_IP_LIMIT:-10}
+      DEMO_SIGNUP_DAILY_LIMIT: ${DEMO_SIGNUP_DAILY_LIMIT:-50}
     volumes:
       # 크롤링 아티클/트렌드 결과 영속화
       - backend-storage:/usr/src/app/storage
